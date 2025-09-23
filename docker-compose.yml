@@ -1,0 +1,22 @@
+version: "3.9"
+services:
+  app:
+    image: mcr.microsoft.com/devcontainers/java:1-21-bullseye
+    command: sleep infinity
+    volumes:
+      - .:/workspaces/${LOCAL_WORKSPACE_FOLDER_BASENAME:-app}
+    depends_on:
+      - db
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: om_user
+      POSTGRES_PASSWORD: om_pass
+      POSTGRES_DB: order_manager
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+volumes:
+  pgdata:
