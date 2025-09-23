@@ -1,0 +1,34 @@
+{
+  "name": "order-manager-dev",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "app",
+  "runServices": ["db"],
+  "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+  "features": {
+    "ghcr.io/devcontainers/features/git:1": {}
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "vscjava.vscode-java-pack",
+        "vmware.vscode-boot-dev-pack",
+        "redhat.vscode-xml",
+        "mhutchie.git-graph",
+        "editorconfig.editorconfig"
+      ]
+    }
+  },
+  "postCreateCommand": "sdk install maven 3.9.8 || true",
+  "forwardPorts": [8080, 5432],
+  "portsAttributes": {
+    "8080": { "label": "App" },
+    "5432": { "label": "PostgreSQL" }
+  },
+  "containerEnv": {
+    "JAVA_TOOL_OPTIONS": "-XX:+UseG1GC -Xms512m -Xmx2g"
+  },
+  "hostRequirements": {
+    "cpus": 2,
+    "memory": "4gb"
+  }
+}
