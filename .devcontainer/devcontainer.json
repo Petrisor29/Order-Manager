@@ -1,9 +1,6 @@
 {
   "name": "order-manager-dev",
-  "dockerComposeFile": "docker-compose.yml",
-  "service": "app",
-  "runServices": ["db"],
-  "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+  "image": "mcr.microsoft.com/devcontainers/java:1-21-bullseye",
   "features": {
     "ghcr.io/devcontainers/features/git:1": {}
   },
@@ -18,17 +15,11 @@
       ]
     }
   },
-  "postCreateCommand": "sdk install maven 3.9.8 || true",
-  "forwardPorts": [8080, 5432],
-  "portsAttributes": {
-    "8080": { "label": "App" },
-    "5432": { "label": "PostgreSQL" }
-  },
+  "postCreateCommand": "sudo apt-get update -y && sudo apt-get install -y maven"
+,
+  "forwardPorts": [8080],
   "containerEnv": {
     "JAVA_TOOL_OPTIONS": "-XX:+UseG1GC -Xms512m -Xmx2g"
   },
-  "hostRequirements": {
-    "cpus": 2,
-    "memory": "4gb"
-  }
+  "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}"
 }
