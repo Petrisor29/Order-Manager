@@ -1,0 +1,16 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:ordermanager;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    driverClassName: org.h2.Driver
+    username: sa
+    password:
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+server:
+  port: 8080
