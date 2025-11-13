@@ -1,83 +1,163 @@
 package com.ordermanager.api.service;
 
 import com.ordermanager.api.model.*;
+import com.ordermanager.api.repository.CustomerRepository;
+import com.ordermanager.api.repository.OrderItemRepository;
+import com.ordermanager.api.repository.OrderRepository;
+import com.ordermanager.api.repository.ProductRepository;
 import org.springframework.stereotype.Service;
 
-import java.util.*;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.NoSuchElementException;
 
 @Service
 public class OrderService {
-    private final CustomerService customers;
-    private final ProductService products;
 
-    private final Map<Integer, Order> orders = new LinkedHashMap<>();
-    private final AtomicInteger nextId = new AtomicInteger(1);
+    private final CustomerRepository customerRepository;
+    private final ProductRepository productRepository;
+    private final OrderRepository orderRepository;
+    private final OrderItemRepository orderItemRepository;
 
-    public OrderService(CustomerService customers, ProductService products){
-        this.customers = customers; this.products = products;
+    public OrderService(CustomerRepository customerRepository,
+                        ProductRepository productRepository,
+                        OrderRepository orderRepository,
+                        OrderItemRepository orderItemRepository) {
+        this.customerRepository = customerRepository;
+        this.productRepository = productRepository;
+        this.orderRepository = orderRepository;
+        this.orderItemRepository = orderItemRepository;
     }
 
-    public Order create(int customerId){
-        if (customers.byId(customerId) == null) throw new NoSuchElementException("Customer not found: "+customerId);
-        int id = nextId.getAndIncrement();
-        Order o = new Order(id, customerId);
-        orders.put(id, o);
-        return o;
+    // -------- 1. Creează comandă nouă --------
+    public Order create(Long customerId) {
+        Customer customer = customerRepository.findById(customerId)
+                .orElseThrow(() -> new NoSuchElementException("Customer not found: " + customerId));
+
+        Order order = new Order();
+        order.setCustomer(customer);
+        order.setStatus(OrderStatus.NEW);
+        order.setCreatedAt(LocalDateTime.now());
+
+        return orderRepository.save(order);
     }
 
-    public Order addItem(int orderId, int productId, int qty){
-        if (qty <= 0) throw new IllegalArgumentException("Quantity must be > 0");
-        Order o = orders.get(orderId); if (o==null) throw new NoSuchElementException("Order not found: "+orderId);
-        if (o.getStatus()!=OrderStatus.NEW) throw new IllegalStateException("Order not editable in status: "+o.getStatus());
-        var p = products.findById(productId); if (p==null) throw new NoSuchElementException("Product not found: "+productId);
-
-        // dacă există deja, creștem cantitatea
-        for (var it : o.getItems()){
-            if (it.getProductId()==productId){ it.setQuantity(it.getQuantity()+qty); return o; }
+    // -------- 2. Adaugă item într-o comandă --------
+    public Order addItem(Long orderId, Long productId, int qty) {
+        if (qty <= 0) {
+            throw new IllegalArgumentException("Quantity must be > 0");
         }
-        o.getItems().add(new OrderItem(p.getId(), p.getName(), p.getPrice(), qty));
-        return o;
+
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new NoSuchElementException("Order not found: " + orderId));
+
+        if (order.getStatus() != OrderStatus.NEW) {
+            throw new IllegalStateException("Order not editable in status: " + order.getStatus());
+        }
+
+        Product product = productRepository.findById(productId)
+                .orElseThrow(() -> new NoSuchElementException("Product not found: " + productId));
+
+        // căutăm dacă produsul există deja în comandă
+        OrderItem existingItem = order.getItems().stream()
+                .filter(it -> it.getProduct().getId().equals(productId))
+                .findFirst()
+                .orElse(null);
+
+        if (existingItem != null) {
+            existingItem.setQuantity(existingItem.getQuantity() + qty);
+            orderItemRepository.save(existingItem);
+        } else {
+            OrderItem item = new OrderItem();
+            item.setOrder(order);
+            item.setProduct(product);
+            item.setQuantity(qty);
+            item.setUnitPrice(product.getPrice());
+            order.getItems().add(item);
+            orderItemRepository.save(item);
+        }
+
+        return orderRepository.save(order);
     }
 
-    public double total(int orderId){
-        Order o = orders.get(orderId); if (o==null) throw new NoSuchElementException("Order not found: "+orderId);
-        return o.getItems().stream().mapToDouble(it -> it.getUnitPrice()*it.getQuantity()).sum();
+    // -------- 3. Total comandă --------
+    public double total(Long orderId) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new NoSuchElementException("Order not found: " + orderId));
+
+        return order.getItems().stream()
+                .mapToDouble(it -> it.getUnitPrice() * it.getQuantity())
+                .sum();
     }
 
-    public Order changeStatus(int orderId, OrderStatus newStatus){
-        Order o = orders.get(orderId); if (o==null) throw new NoSuchElementException("Order not found: "+orderId);
-        OrderStatus cur = o.getStatus();
+    // -------- 4. Schimbare status (cu reguli ca înainte) --------
+    public Order changeStatus(Long orderId, OrderStatus newStatus) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new NoSuchElementException("Order not found: " + orderId));
+
+        OrderStatus cur = order.getStatus();
+
         boolean valid =
-            (cur==OrderStatus.NEW  && (newStatus==OrderStatus.PAID || newStatus==OrderStatus.CANCELLED)) ||
-            (cur==OrderStatus.PAID && (newStatus==OrderStatus.SHIPPED || newStatus==OrderStatus.CANCELLED));
-        if (!valid) throw new IllegalStateException("Invalid transition: "+cur+" -> "+newStatus);
-        o.setStatus(newStatus);
-        return o;
+                (cur == OrderStatus.NEW && (newStatus == OrderStatus.PAID || newStatus == OrderStatus.CANCELLED)) ||
+                (cur == OrderStatus.PAID && (newStatus == OrderStatus.SHIPPED || newStatus == OrderStatus.CANCELLED));
+
+        if (!valid) {
+            throw new IllegalStateException("Invalid transition: " + cur + " -> " + newStatus);
+        }
+
+        order.setStatus(newStatus);
+        return orderRepository.save(order);
     }
 
-    public List<Order> all(){ return new ArrayList<>(orders.values()); }
-    public Order byId(int id){ return orders.get(id); }
-
-    public List<Order> byCustomer(int customerId){
-        List<Order> out = new ArrayList<>();
-        for (var o : orders.values()) if (o.getCustomerId()==customerId) out.add(o);
-        return out;
+    // -------- 5. Toate comenzile --------
+    public List<Order> all() {
+        return orderRepository.findAll();
     }
 
-    public List<Order> byStatus(OrderStatus st){
-        List<Order> out = new ArrayList<>();
-        for (var o : orders.values()) if (o.getStatus()==st) out.add(o);
-        return out;
+    // -------- 6. Comandă după id --------
+    public Order byId(Long id) {
+        return orderRepository.findById(id)
+                .orElseThrow(() -> new NoSuchElementException("Order not found: " + id));
     }
 
-    public Order updateItemQty(int orderId, int productId, int newQty){
-        Order o = orders.get(orderId); if (o==null) throw new NoSuchElementException("Order not found: "+orderId);
-        if (o.getStatus()!=OrderStatus.NEW) throw new IllegalStateException("Order not editable in status: "+o.getStatus());
-        if (newQty<0) throw new IllegalArgumentException("Quantity must be >= 0");
-        var it = o.getItems().stream().filter(x -> x.getProductId()==productId).findFirst().orElse(null);
-        if (it==null) throw new NoSuchElementException("Product not in order: "+productId);
-        if (newQty==0) { o.getItems().remove(it); } else { it.setQuantity(newQty); }
-        return o;
+    // -------- 7. Comenzi după client --------
+    public List<Order> byCustomer(Long customerId) {
+        return orderRepository.findByCustomerId(customerId);
+    }
+
+    // -------- 8. Comenzi după status --------
+    public List<Order> byStatus(OrderStatus status) {
+        return orderRepository.findAll().stream()
+                .filter(o -> o.getStatus() == status)
+                .toList();
+    }
+
+    // -------- 9. Update cantitate item --------
+    public Order updateItemQty(Long orderId, Long productId, int newQty) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new NoSuchElementException("Order not found: " + orderId));
+
+        if (order.getStatus() != OrderStatus.NEW) {
+            throw new IllegalStateException("Order not editable in status: " + order.getStatus());
+        }
+
+        if (newQty < 0) {
+            throw new IllegalArgumentException("Quantity must be >= 0");
+        }
+
+        OrderItem item = order.getItems().stream()
+                .filter(it -> it.getProduct().getId().equals(productId))
+                .findFirst()
+                .orElseThrow(() -> new NoSuchElementException("Product not in order: " + productId));
+
+        if (newQty == 0) {
+            order.getItems().remove(item);
+            orderItemRepository.delete(item);
+        } else {
+            item.setQuantity(newQty);
+            orderItemRepository.save(item);
+        }
+
+        return orderRepository.save(order);
     }
 }
